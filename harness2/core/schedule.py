@@ -652,7 +652,12 @@ def run_task(
                 res=res,
             )
         except Exception as exc:
+            # Merge rather than replace: `_run_one_mode` may have already stored
+            # the mode's stage records (with their spend) before selection or the
+            # library write raised. Dropping them here would undercount the paid
+            # sessions in `harness2-report`.
             res.modes[mode] = {
+                **res.modes.get(mode, {}),
                 "ok": False,
                 "error": f"{type(exc).__name__}: {exc}",
                 "traceback": traceback.format_exc()[-1500:],

@@ -21,7 +21,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from harness2 import config
-from harness2.core import context, judge, recursion, schedule, tree
+from harness2.core import context, judge, recursion, schedule, selection, tree
 from harness2.core.library import Library
 from harness2.core.proposer import Proposer, ProposerError, Reply
 from harness2.core.spec import resolve_channel_model
@@ -223,6 +223,25 @@ class WorkflowTests(unittest.TestCase):
         )
         self.adapter.score.assert_not_called()
         self.assertEqual((rows[0].graded, rows[0].n_passed), (False, None))
+
+    def test_failed_mode_keeps_stage_spend(self):
+        """A mode that fails after its stages ran must keep those stage records.
+
+        The except block in ``run_task`` used to replace the mode record with
+        ``{ok, error, traceback}``, dropping the ``stages`` list that carries the
+        editor/composer spend, so ``harness2-report`` undercounted paid sessions.
+        ``run_selection`` runs after the stages are recorded, so making it raise
+        exercises exactly that "fail after the stages ran" path.
+        """
+        with patch.object(selection, "run_selection", side_effect=RuntimeError("grader tripwire")):
+            self.run_stream(k=2)
+        summary_path = self.adapter.spec.runs_root / "demo-oc-agg2/ledger-1/summary.json"
+        summary = json.loads(summary_path.read_text())
+
+        agg = summary["modes"]["agg"]
+        self.assertFalse(agg.get("ok"), "failed mode must stay not-ok")
+        self.assertIn("stages", agg, "failed mode must retain its stage records")
+        self.assertTrue(agg["stages"], "failed mode's stages must not be empty")
 
 
 if __name__ == "__main__":
