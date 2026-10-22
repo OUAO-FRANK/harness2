@@ -317,27 +317,40 @@ def _write_summary(summary_path: Path, res: TaskResult) -> None:
             merged = res.to_dict()
             if summary_path.is_file():
                 old = _load_old(summary_path)
-                for key in ("modes", "selections"):
-                    prev = _modes_of(old) if key == "modes" else dict(old.get(key) or {})
-                    prev.update(merged.get(key) or {})
-                    merged[key] = prev
+                inputs_changed = (
+                    res.inputs is not None
+                    and old.get("inputs") is not None
+                    and old.get("inputs") != res.inputs
+                )
+                if not inputs_changed:
+                    for key in ("modes", "selections"):
+                        prev = _modes_of(old) if key == "modes" else dict(old.get(key) or {})
+                        prev.update(merged.get(key) or {})
+                        merged[key] = prev
 
-                merged["errors"] = list(merged.get("errors") or [])
-                seen = {json.dumps(e, sort_keys=True, default=str) for e in merged["errors"]}
-                for e in old.get("errors") or []:
-                    if e == "no base rollout produced anything" and res.status in ("ok", "partial"):
-                        continue
-                    mode = str(e).partition(":")[0]
-                    if (
-                        (res.modes.get(mode) or {}).get("ok")
-                        and (res.selections.get(mode) or {}).get("ok")
-                        and (res.selections.get(mode) or {}).get("chosen_label")
-                    ):
-                        continue
-                    if json.dumps(e, sort_keys=True, default=str) not in seen:
-                        merged["errors"].append(e)
-                if merged.get("status") in ("ok", "partial"):
-                    merged["status"] = _merged_status(merged)
+                    merged["errors"] = list(merged.get("errors") or [])
+                    seen = {json.dumps(e, sort_keys=True, default=str) for e in merged["errors"]}
+                    for e in old.get("errors") or []:
+                        if e == "no base rollout produced anything" and res.status in (
+                            "ok",
+                            "partial",
+                        ):
+                            continue
+                        mode = str(e).partition(":")[0]
+                        if (
+                            (res.modes.get(mode) or {}).get("ok")
+                            and (res.selections.get(mode) or {}).get("ok")
+                            and (res.selections.get(mode) or {}).get("chosen_label")
+                        ):
+                            continue
+                        if json.dumps(e, sort_keys=True, default=str) not in seen:
+                            merged["errors"].append(e)
+                    if merged.get("status") in ("ok", "partial"):
+                        merged["status"] = _merged_status(merged)
+                # else: the previous summary answered a different question. Its mode
+                # records and selections were derived from the old inputs and must not
+                # be re-used under the new digest, otherwise a later run would skip
+                # recomputation for results that are already stale.
             tmp = summary_path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(merged, indent=2, default=str))
             os.replace(tmp, summary_path)

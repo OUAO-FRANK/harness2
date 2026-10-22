@@ -179,6 +179,46 @@ class SummaryInputTests(unittest.TestCase):
         self.assertFalse(resumed)
         self.assertNotIn("task inputs", printed)
 
+    def test_write_summary_drops_modes_from_an_older_input_identity(self):
+        """Modes recorded under a previous input digest must not survive a re-run.
+
+        `_write_summary` merges per-mode records across processes, but a mode computed
+        from the old inputs is an answer to a different question. Carrying it over under
+        the new digest would let a later run skip recomputation for a stale result.
+        """
+        adapter = _FakeAdapter("Sum ledger.csv.", self.files)
+        self.summary.write_text(
+            json.dumps(
+                {
+                    "task_id": "task-1",
+                    "domain": "d",
+                    "k": 1,
+                    "status": "ok",
+                    "inputs": schedule._task_inputs(adapter, "task-1"),
+                    "modes": {"agg": {"ok": True}, "seq": {"ok": True}},
+                    "selections": {
+                        "agg": {"ok": True, "chosen_label": "c1"},
+                        "seq": {"ok": True, "chosen_label": "c1"},
+                    },
+                }
+            )
+        )
+
+        # The task changes; only `agg` is re-run and written back.
+        (self.files / "ledger.csv").write_text("amount\n1.00\n2.00\n")
+        res = schedule.TaskResult(task_id="task-1", domain="d", k=1)
+        res.inputs = schedule._task_inputs(adapter, "task-1")
+        res.status = "ok"
+        res.modes["agg"] = {"ok": True}
+        res.selections["agg"] = {"ok": True, "chosen_label": "c2"}
+        schedule._write_summary(self.summary, res)
+
+        merged = json.loads(self.summary.read_text())
+        self.assertEqual(merged["inputs"], res.inputs)
+        self.assertIn("agg", merged["modes"])
+        self.assertNotIn("seq", merged["modes"])
+        self.assertNotIn("seq", merged["selections"])
+
 
 class RolloutReuseTests(unittest.TestCase):
     """The reported symptom, end to end through `LabAdapter.execute`.
