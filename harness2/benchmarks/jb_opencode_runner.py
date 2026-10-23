@@ -236,18 +236,25 @@ def run_one(cfg: Settings, task_id: str) -> bool:
     output_dir = workspace / "output"
     _stage(task_dir, cfg.render_dir, workspace)
 
+    code = -1
     for attempt in range(1, cfg.max_retries + 1):
         if attempt > 1:
             _reset_task(task_dir, workspace)
         traj_file = traj_dir / f"{task_name}_{cfg.label}_attempt{attempt}_{_stamp()}.jsonl"
         _log(log_file, f"[{_hms()}] run {task_id} ({cfg.label}) attempt {attempt} -> {traj_file}")
         code = _attempt(cfg, workspace, traj_file, log_file, task_name, attempt)
-        if _nonempty(output_dir):
+        # A rollout that wrote a draft but was then stopped by the time limit
+        # (exit 124/137) or killed (negative signal) must not be treated as
+        # finished: break only on a clean exit with output, and record the exit
+        # status so killed rollouts leave a trace in the log.
+        if _nonempty(output_dir) and code == 0:
             break
-        if code in (124, 137):
-            _log(log_file, f"[{_hms()}] TIMEOUT {task_id} attempt {attempt}")
+        if code in (124, 137) or code < 0:
+            _log(log_file, f"[{_hms()}] TIMEOUT {task_id} attempt {attempt} (exit {code})")
+        elif code != 0:
+            _log(log_file, f"[{_hms()}] non-zero exit {code} {task_id} attempt {attempt}")
 
-    delivered = _nonempty(output_dir)
+    delivered = code == 0 and _nonempty(output_dir)
     if delivered:
         final_output_dir.mkdir(parents=True, exist_ok=True)
         for item in sorted(output_dir.iterdir()):
