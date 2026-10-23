@@ -50,7 +50,9 @@ class Scored:
 
     @property
     def frac(self) -> float | None:
-        return (self.n_passed / self.n_criteria) if self.graded else None
+        if not self.graded or self.n_passed is None:
+            return None
+        return self.n_passed / self.n_criteria
 
 
 def _mode_of(sel: dict) -> str:
@@ -83,7 +85,13 @@ def judge_one(
     s.raw = dict(got)
     s.n_passed = got.get("n_passed")
     s.n_criteria = got.get("n_criteria")
-    s.all_pass = bool(got.get("all_pass", s.graded and s.n_passed == s.n_criteria))
+    # A forwarded `all_pass: null` must read as "absent", not as a failed pass:
+    # dict.get's default only fires for a missing key, and the LAB adapter spells
+    # out every key so an upstream omission arrives as None rather than absent.
+    raw_all_pass = got.get("all_pass")
+    if raw_all_pass is None:
+        raw_all_pass = s.graded and s.n_passed == s.n_criteria
+    s.all_pass = bool(raw_all_pass)
     return s
 
 
